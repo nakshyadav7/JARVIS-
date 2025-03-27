@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S. AI Assistant</title>
+    <style>
+        body {
+            background: #0a0a2e;
+            color: #fff;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            text-align: center;
+            max-width: 800px;
+            width: 90%;
+        }
+
+        .jarvis-face {
+            width: 200px;
+            height: 200px;
+            background: linear-gradient(45deg, #00ffff, #0066ff);
+            border-radius: 50%;
+            margin: 20px auto;
+            position: relative;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 30px #00ffff;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        button {
+            background: #0066ff;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 18px;
+            cursor: pointer;
+            margin: 20px;
+            transition: all 0.3s;
+            box-shadow: 0 0 15px #0066ff;
+        }
+
+        button:hover {
+            background: #0052cc;
+            transform: scale(1.05);
+        }
+
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .status {
+            font-size: 20px;
+            margin: 20px;
+            color: #00ffff;
+        }
+
+        .log {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            width: 100%;
+            min-height: 100px;
+            margin: 20px 0;
+            text-align: left;
+            border: 1px solid #00ffff33;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="jarvis-face"></div>
+        <button id="listenButton">Initialize System</button>
+        <div class="status" id="status">Status: Offline</div>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        const listenButton = document.getElementById('listenButton');
+        const statusElement = document.getElementById('status');
+        const logElement = document.getElementById('log');
+        let recognition;
+        let isListening = false;
+
+        // Cohere API Configuration
+        const COHERE_API_KEY = 'FW6OaAFcly5nGK8xekqrlyKfcvoHkQ3F6EkbacxW'; // Replace with your actual key
+        const COHERE_ENDPOINT = 'https://api.cohere.ai/v1/generate';
+
+        async function initializeSystem() {
+            try {
+                if (!('speechSynthesis' in window)) {
+                    throw new Error('Speech synthesis not supported');
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) throw new Error('Speech recognition not supported');
+                
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+
+                recognition.onstart = () => {
+                    isListening = true;
+                    statusElement.textContent = 'Status: Active Listening';
+                    listenButton.textContent = 'Stop Listening';
+                };
+
+                recognition.onresult = async (event) => {
+                    const transcript = event.results[event.results.length - 1][0].transcript;
+                    addToLog(`You: ${transcript}`);
+                    await processCommand(transcript);
+                };
+
+                recognition.onerror = (event) => {
+                    statusElement.textContent = `Error: ${event.error}`;
+                    addToLog(`System Error: ${event.error}`, 'error');
+                };
+
+                recognition.onend = () => {
+                    if (isListening) recognition.start();
+                };
+
+                listenButton.textContent = 'Start Listening';
+                statusElement.textContent = 'Status: Ready';
+                
+            } catch (error) {
+                handleInitializationError(error);
+            }
+        }
+
+        async function processCommand(command) {
+            statusElement.textContent = 'Status: Processing...';
+            
+            try {
+                const response = await fetch(COHERE_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${COHERE_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: 'command',
+                        prompt: `You are J.A.R.V.I.S. from Iron Man. Respond concisely to: ${command}`,
+                        max_tokens: 150,
+                        temperature: 0.7,
+                        k: 0,
+                        stop_sequences: [],
+                        return_likelihoods: 'NONE'
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const aiResponse = data.generations[0].text.replace(/(\r\n|\n|\r)/gm, "");
+                
+                addToLog(`JARVIS: ${aiResponse}`, 'jarvis');
+                speak(aiResponse);
+
+            } catch (error) {
+                addToLog(`JARVIS: Connection error, sir. Falling back to local processing.`, 'error');
+                console.error('API Error:', error);
+                handleLocalCommand(command.toLowerCase());
+            }
+            
+            statusElement.textContent = 'Status: Ready';
+        }
+
+        function handleLocalCommand(command) {
+            let response = "I didn't understand that command.";
+            
+            // Basic fallback commands
+            if (command.includes('time')) {
+                response = `Current time is ${new Date().toLocaleTimeString()}`;
+            } else if (command.includes('date')) {
+                response = `Today's date is ${new Date().toLocaleDateString()}`;
+            } else if (command.includes('your name')) {
+                response = "I am J.A.R.V.I.S., Just A Rather Very Intelligent System";
+            } else if (command.includes('background')) {
+                document.body.style.background = `hsl(${Math.random() * 360}, 70%, 10%)`;
+                response = "Interface background modified";
+            }
+
+            addToLog(`JARVIS: ${response}`, 'jarvis');
+            speak(response);
+        }
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.9;
+            utterance.pitch = 0.8;
+
+            const synth = window.speechSynthesis;
+            const voices = synth.getVoices();
+            
+            if (voices.length > 0) {
+                selectVoice(utterance);
+            } else {
+                synth.addEventListener('voiceschanged', () => {
+                    selectVoice(utterance);
+                });
+            }
+
+            synth.speak(utterance);
+        }
+
+        function selectVoice(utterance) {
+            const voices = window.speechSynthesis.getVoices();
+            const preferredVoice = voices.find(voice => 
+                voice.name.includes('Google UK English Male') || 
+                voice.name.includes('Microsoft David')
+            );
+            if (preferredVoice) {
+                utterance.voice = preferredVoice;
+            }
+        }
+
+        function addToLog(message, type = 'user') {
+            const colors = {
+                user: '#fff',
+                jarvis: '#00ffff',
+                error: '#ff4444'
+            };
+            logElement.innerHTML += `<div style="color: ${colors[type]}">${message}</div>`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function handleInitializationError(error) {
+            console.error('Initialization error:', error);
+            statusElement.textContent = `Error: ${error.message}`;
+            listenButton.disabled = true;
+            
+            if (error.name === 'NotAllowedError') {
+                addToLog('Error: Microphone access denied. Please enable permissions.', 'error');
+            } else if (error.name === 'NotFoundError') {
+                addToLog('Error: No microphone found.', 'error');
+            } else {
+                addToLog(`System Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Main initialization
+        listenButton.addEventListener('click', async () => {
+            if (listenButton.textContent === 'Initialize System') {
+                await initializeSystem();
+            } else {
+                if (!isListening) {
+                    recognition.start();
+                } else {
+                    isListening = false;
+                    recognition.stop();
+                    listenButton.textContent = 'Start Listening';
+                    statusElement.textContent = 'Status: Standby';
+                }
+            }
+        });
+    </script>
+</body>
+</html>
